@@ -93,16 +93,39 @@ mod keyboard;
 pub use crate::keyboard::KeyboardState;
 use pixel_canvas::{Canvas, Color, input::glutin::event::VirtualKeyCode};
 
+
+struct Player {
+    player_x: f64,
+    player_y: f64,
+    vision_angle: f64,
+}
+
+impl Player {
+    fn new(starting_x: f64, starting_y: f64, starting_angle: f64) -> Self {
+        Self {
+            player_x: starting_x,
+            player_y: starting_y,
+            vision_angle: starting_angle
+        }
+    }
+
+    fn rotate(&mut self, angle: f64) {
+        self.vision_angle += angle
+    }
+
+    fn walk(&mut self, step: f64) {
+        self.player_x += self.vision_angle.sin() * step;
+        self.player_y += self.vision_angle.cos() * step;
+    }
+}
+
 fn main() {
     let canvas = Canvas::new(512, 512)
         .title("Ray Casting Simulation")
         .state(KeyboardState::new())
         .input(KeyboardState::handle_input);
 
-    // player
-    let mut player_x: f64 = 8.0;
-    let mut player_y: f64 = 8.0;
-    let mut player_vision_angle: f64 = 0.0;
+    let mut player: Player = Player::new(8.0, 8.0, 0.0);
 
     // map
     let map_height: u16 = 16;
@@ -130,7 +153,7 @@ fn main() {
         // distance to wall
         let max_wall_check_depth: f64 = 16.0; // follows map size 
 
-    canvas.render(move |keyboard, image| {
+    canvas.render(move |keyboard: &mut KeyboardState, image| {
         let width = image.width();
 
         let mut ceiling_lower_boundary: f64;
@@ -158,35 +181,30 @@ fn main() {
         let mut shade_multiplier: f64;
 
         match keyboard.key_pressed() {
-            Some(VirtualKeyCode::A) => player_vision_angle -= 0.1,
-            Some(VirtualKeyCode::D) => player_vision_angle += 0.1,
+            Some(VirtualKeyCode::A) => player.rotate(-0.1),
+            Some(VirtualKeyCode::D) => player.rotate(0.1),
             Some(VirtualKeyCode::W) => {
-                player_x += player_vision_angle.sin() * 0.2;
-                player_y += player_vision_angle.cos() * 0.2;
-
-                if map[(player_y as u16 * map_width + player_x as u16) as usize] == '#' {
-                    player_x -= player_vision_angle.sin() * 0.2;
-                    player_y -= player_vision_angle.cos() * 0.2; 
+                player.walk(0.2);
+                // step back if we hit a wall
+                if map[(player.player_y as u16 * map_width + player.player_x as u16) as usize] == '#' {
+                    player.walk(-0.2);
                 }
             },
             Some(VirtualKeyCode::S) => {
-                player_x -= player_vision_angle.sin() * 0.2;
-                player_y -= player_vision_angle.cos() * 0.2;
-
-                if map[(player_y as u16 * map_width + player_x as u16) as usize] == '#' {
-                    player_x += player_vision_angle.sin() * 0.2;
-                    player_y += player_vision_angle.cos() * 0.2; 
+                player.walk(-0.2);
+                // step back if we hit a wall
+                if map[(player.player_y as u16 * map_width + player.player_x as u16) as usize] == '#' {
+                    player.walk(0.2);
                 }
             },
             _ => (),
         }
 
         for (y, row) in image.chunks_mut(width).enumerate() {
-
             for (x, pixel) in row.iter_mut().enumerate() {
 
                 // starting ray angle for FOV swip
-                start_of_fov_angle = player_vision_angle - (field_of_view_angle / 2.0);
+                start_of_fov_angle = player.vision_angle - (field_of_view_angle / 2.0);
                 ray_angle = start_of_fov_angle + (x as f64 / width as f64) * field_of_view_angle;
 
                 // distance to wall logic
@@ -202,8 +220,8 @@ fn main() {
                     distance_to_wall += 0.1;
 
                     // test point, all walls are in integer boundaries so we don't care for non-int values
-                    test_x = (player_x + unit_ray_x * distance_to_wall) as u16;
-                    test_y = (player_y + unit_ray_y * distance_to_wall) as u16;
+                    test_x = (player.player_x + unit_ray_x * distance_to_wall) as u16;
+                    test_y = (player.player_y + unit_ray_y * distance_to_wall) as u16;
 
                     // test if point is out of bounds
                     if test_x >= map_width || test_y >= map_height {
