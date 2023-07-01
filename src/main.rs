@@ -119,18 +119,15 @@ impl Player {
     }
 }
 
-fn main() {
-    let canvas = Canvas::new(512, 512)
-        .title("Ray Casting Simulation")
-        .state(KeyboardState::new())
-        .input(KeyboardState::handle_input);
+struct Map {
+    height: u16,
+    width: u16,
+    layout: Vec<char>
+}
 
-    let mut player: Player = Player::new(8.0, 8.0, 0.0);
-
-    // map
-    let map_height: u16 = 16;
-    let map_width: u16 = 16;
-    let map: Vec<char> =
+impl Map {
+    fn new(height: u16, width: u16) -> Self {
+        let layout =
         "################\
         #..............#\
         #..............#\
@@ -145,39 +142,56 @@ fn main() {
         #.##...........#\
         #......#.......#\
         #......#.......#\
-        ################".chars().collect();
-        
-        // FOV
-        let field_of_view_angle = 3.14159 / 4.0; // pi * 1/4 (very narrow field of view)
+        ################".chars().collect(); 
+        Self { height, width,layout }
+    }
 
-        // distance to wall
-        let max_wall_check_depth: f64 = 16.0; // follows map size 
+    fn is_wall(&self, x: f64, y: f64) -> bool {
+        self.layout[(y as u16 * self.width + x as u16) as usize] == '#'
+    }
+
+    fn out_of_bounds(&self, x: u16, y: u16) -> bool {
+        x >= self.width || y >= self.height
+    }
+}
+
+struct Life {
+    fov_angle: f64,
+    max_wall_check_depth: f64,
+}
+
+impl Life {
+    fn new(fov_angle: f64, max_wall_check_depth: f64) -> Self {
+        Self { fov_angle, max_wall_check_depth }
+    }
+}
+
+fn main() {
+    let canvas = Canvas::new(512, 512)
+        .title("Ray Casting Simulation")
+        .state(KeyboardState::new())
+        .input(KeyboardState::handle_input);
+
+    let map: Map = Map::new(16, 16);
+    let life = Life::new(3.14159 / 4.0, 16.0);
+    let mut player: Player = Player::new(8.0, 8.0, 0.0);
 
     canvas.render(move |keyboard: &mut KeyboardState, image| {
+        
+        // LOOP HELPER VARIABLES
         let width = image.width();
-
         let mut ceiling_lower_boundary: f64;
         let mut floor_upper_boundary: f64;
-
-        // FOV
         let mut start_of_fov_angle: f64;
-
-        // ray casting
         let mut ray_angle: f64;
         let mut unit_ray_x: f64;
         let mut unit_ray_y: f64;
-
-        // distance to wall
         let mut distance_to_wall: f64;
         let mut hit_wall: bool;
         let mut test_x: u16;
         let mut test_y: u16;
-
-        // paint canvas
-        let mut pixel_color;
-
+        let mut pixel_color: Color;
         let mut wall_color_shade: u8;
-
         let mut shade_multiplier: f64;
 
         match keyboard.key_pressed() {
@@ -185,15 +199,13 @@ fn main() {
             Some(VirtualKeyCode::D) => player.rotate(0.1),
             Some(VirtualKeyCode::W) => {
                 player.walk(0.2);
-                // step back if we hit a wall
-                if map[(player.player_y as u16 * map_width + player.player_x as u16) as usize] == '#' {
+                if map.is_wall(player.player_x, player.player_y) {
                     player.walk(-0.2);
                 }
             },
             Some(VirtualKeyCode::S) => {
                 player.walk(-0.2);
-                // step back if we hit a wall
-                if map[(player.player_y as u16 * map_width + player.player_x as u16) as usize] == '#' {
+                if map.is_wall(player.player_x, player.player_y) {
                     player.walk(0.2);
                 }
             },
@@ -204,8 +216,8 @@ fn main() {
             for (x, pixel) in row.iter_mut().enumerate() {
 
                 // starting ray angle for FOV swip
-                start_of_fov_angle = player.vision_angle - (field_of_view_angle / 2.0);
-                ray_angle = start_of_fov_angle + (x as f64 / width as f64) * field_of_view_angle;
+                start_of_fov_angle = player.vision_angle - (life.fov_angle / 2.0);
+                ray_angle = start_of_fov_angle + (x as f64 / width as f64) * life.fov_angle;
 
                 // distance to wall logic
                 hit_wall = false;
@@ -216,20 +228,18 @@ fn main() {
                 unit_ray_y = ray_angle.cos();
 
                 // scalar horizon stepping 
-                while !hit_wall && distance_to_wall < max_wall_check_depth {
+                while !hit_wall && distance_to_wall < life.max_wall_check_depth {
                     distance_to_wall += 0.1;
 
                     // test point, all walls are in integer boundaries so we don't care for non-int values
                     test_x = (player.player_x + unit_ray_x * distance_to_wall) as u16;
                     test_y = (player.player_y + unit_ray_y * distance_to_wall) as u16;
 
-                    // test if point is out of bounds
-                    if test_x >= map_width || test_y >= map_height {
+                    if map.out_of_bounds(test_x, test_y) {
                         hit_wall = true;
-                        distance_to_wall = max_wall_check_depth;
+                        distance_to_wall = life.max_wall_check_depth;
                     } else {
-                        // we are in bounds, check if test point is hitting a wall
-                        if map[(test_y * map_width + test_x) as usize] == '#' {
+                        if map.is_wall(test_x as f64, test_y as f64) {
                             hit_wall = true;
                         }
                     }
@@ -252,12 +262,6 @@ fn main() {
                     pixel_color = Color { r: wall_color_shade, g: wall_color_shade, b: wall_color_shade };
                     // ceiling
                 } else {
-                    // shade_multiplier = (0.9 / ((width-1) as f64 - ceiling_lower_boundary)) * (y as f64 - (width-1) as f64) + 1.0;
-                    // pixel_color = Color { 
-                    //     r: (140.0 * shade_multiplier) as u8, 
-                    //     g: (40.0 * shade_multiplier) as u8, 
-                    //     b: (5.0 * shade_multiplier) as u8
-                    // };
                     pixel_color = Color { r: 0, g: 0, b: 0 }
                 }
 
